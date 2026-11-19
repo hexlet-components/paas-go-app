@@ -5,12 +5,12 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/getsentry/sentry-go"
+	"github.com/gofiber/fiber/v3"
 )
 
 // recorder подменяет транспорт Sentry и запоминает отправленные события.
@@ -35,7 +35,7 @@ func (r *recorder) count() int {
 	return len(r.events)
 }
 
-func setup(t *testing.T) (*httptest.Server, *recorder, *bytes.Buffer) {
+func setup(t *testing.T) (*fiber.App, *recorder, *bytes.Buffer) {
 	t.Helper()
 	t.Setenv("SERVER_MESSAGE", "Первая <публикация>")
 	transport := &recorder{}
@@ -45,9 +45,7 @@ func setup(t *testing.T) (*httptest.Server, *recorder, *bytes.Buffer) {
 	}
 	hub := sentry.NewHub(client, sentry.NewScope())
 	logs := &bytes.Buffer{}
-	server := httptest.NewServer(newHandler(hub, logs))
-	t.Cleanup(server.Close)
-	return server, transport, logs
+	return newApp(hub, logs), transport, logs
 }
 
 type result struct {
@@ -56,13 +54,18 @@ type result struct {
 	body        string
 }
 
-func get(t *testing.T, url string) result {
+func get(t *testing.T, app *fiber.App, path string) result {
 	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
+	return request(t, app, http.MethodGet, path)
+}
+
+func request(t *testing.T, app *fiber.App, method, path string) result {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, path, http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,21 +88,21 @@ func expect(t *testing.T, got result, status int, contentType, body string) {
 }
 
 func TestHomeShowsHeadingAndEscapedMessage(t *testing.T) {
-	server, _, _ := setup(t)
-	expect(t, get(t, server.URL+"/"), http.StatusOK, "text/html; charset=utf-8",
+	app, _, _ := setup(t)
+	expect(t, get(t, app, "/"), http.StatusOK, "text/html; charset=utf-8",
 		"<h1>Привет от Хекслета!</h1><p>Первая &lt;публикация&gt;</p>\n")
 }
 
 func TestHomeDefaultMessage(t *testing.T) {
-	server, _, _ := setup(t)
+	app, _, _ := setup(t)
 	t.Setenv("SERVER_MESSAGE", "")
-	expect(t, get(t, server.URL+"/"), http.StatusOK, "text/html; charset=utf-8",
+	expect(t, get(t, app, "/"), http.StatusOK, "text/html; charset=utf-8",
 		"<h1>Привет от Хекслета!</h1><p>Hello, PaaS!</p>\n")
 }
 
 func TestErrorIsReportedAndServerKeepsWorking(t *testing.T) {
-	server, transport, _ := setup(t)
-	expect(t, get(t, server.URL+"/error"), http.StatusInternalServerError,
+	app, transport, _ := setup(t)
+	expect(t, get(t, app, "/error"), http.StatusInternalServerError,
 		"text/plain; charset=utf-8", "Oops! Something went wrong!\n")
 	if transport.count() != 1 {
 		t.Fatalf("events = %d, want 1", transport.count())
@@ -107,30 +110,38 @@ func TestErrorIsReportedAndServerKeepsWorking(t *testing.T) {
 	if got := transport.events[0].Exception[0].Value; got != "Oops! Something went wrong!" {
 		t.Fatalf("event message = %q", got)
 	}
-	if got := get(t, server.URL+"/"); got.status != http.StatusOK {
+	if got := get(t, app, "/"); got.status != http.StatusOK {
 		t.Fatalf("status after error = %d", got.status)
 	}
 }
 
 func TestUnknownPath(t *testing.T) {
-	server, _, _ := setup(t)
-	expect(t, get(t, server.URL+"/missing"), http.StatusNotFound,
+	app, _, _ := setup(t)
+	expect(t, get(t, app, "/missing"), http.StatusNotFound,
 		"text/plain; charset=utf-8", "not found\n")
 }
 
 func TestRequestIsLogged(t *testing.T) {
-	server, _, logs := setup(t)
-	get(t, server.URL+"/missing")
-	get(t, server.URL+"/")
+	app, _, logs := setup(t)
+	get(t, app, "/missing")
+	get(t, app, "/")
 	if got, want := logs.String(), "GET /missing 404\nGET / 200\n"; got != want {
 		t.Fatalf("log = %q, want %q", got, want)
 	}
 }
 
 func TestListensOnAllInterfaces(t *testing.T) {
-	if got := newServer("3000", http.NotFoundHandler()).Addr; got != "0.0.0.0:3000" {
+	if got := listenAddr("3000"); got != "0.0.0.0:3000" {
 		t.Fatalf("addr = %q", got)
 	}
+}
+
+func TestOtherMethodAndCaseAreNotFound(t *testing.T) {
+	app, _, _ := setup(t)
+	expect(t, request(t, app, http.MethodPost, "/"), http.StatusNotFound,
+		"text/plain; charset=utf-8", "not found\n")
+	expect(t, get(t, app, "/Error"), http.StatusNotFound,
+		"text/plain; charset=utf-8", "not found\n")
 }
 
 func TestEnvFallback(t *testing.T) {
