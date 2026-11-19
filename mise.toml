@@ -23,13 +23,12 @@ description = "Тесты HTTP-контракта приложения"
 run = "go test ./..."
 
 [tasks.build]
-description = "Собрать приложение той же командой, что Build Command на Render"
-run = "go build -o app ."
+description = "Собрать приложение, команда живёт в Makefile"
+run = "make build"
 
 [tasks.start]
-description = "Собрать и запустить приложение командой из Start Command на Render"
-depends = ["build"]
-run = "./app"
+description = "Собрать и запустить приложение, команда живёт в Makefile"
+run = "make start"
 
 [tasks.check]
 description = "Все проверки, тот же набор, что гоняет CI"
