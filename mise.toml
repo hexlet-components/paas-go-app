@@ -22,9 +22,14 @@ run = ["go mod download", "hk install"]
 description = "Тесты HTTP-контракта приложения"
 run = "go test ./..."
 
+[tasks.build]
+description = "Собрать приложение той же командой, что Build Command на Render"
+run = "go build -o app ."
+
 [tasks.start]
-description = "Запустить приложение локально"
-run = "go run ."
+description = "Собрать и запустить приложение командой из Start Command на Render"
+depends = ["build"]
+run = "./app"
 
 [tasks.check]
 description = "Все проверки, тот же набор, что гоняет CI"
