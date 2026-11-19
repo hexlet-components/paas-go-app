@@ -6,12 +6,26 @@ import "package://github.com/jdx/hk/releases/download/v2.8.1/hk@2.8.1#/Builtins.
 // Быстрые проверки идут на каждый коммит. Сеть и долгие шаги вынесены в all:
 // их гоняют check, pre-push и CI.
 local fast = new Mapping<String, Step> {
+  ["golangci-fmt"] {
+    glob = List("**/*.go")
+    check = "golangci-lint fmt --diff"
+    fix = "golangci-lint fmt"
+  }
+  ["golangci-lint"] {
+    glob = List("**/*.go", "go.mod", ".golangci.yml")
+    check = "golangci-lint run"
+    fix = "golangci-lint run --fix"
+  }
   ["rumdl"] = Builtins.rumdl
   ["typos"] = Builtins.typos
   ["jactionlint"] = Builtins.jactionlint
 }
 
 local all = (fast) {
+  ["govulncheck"] {
+    glob = List("**/*.go", "go.mod", "go.sum")
+    check = "govulncheck ./..."
+  }
   ["lychee"] {
     glob = List("**/*.md")
     check = "lychee --config lychee.toml --no-progress {{files}}"
