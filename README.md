@@ -47,7 +47,7 @@ mise run test
 PORT=3000 SERVER_MESSAGE="Первая публикация" mise run start
 ```
 
-`make build` и `make start` повторяют Build Command и Start Command из таблицы выше, `start` перед запуском сам выполняет `build`. Эти две цели работают без mise, нужен только рантайм стека.
+`make build` и `make start` повторяют Build Command и Start Command из таблицы выше, `start` перед запуском сам выполняет `build`. Эти две цели работают без mise, нужен только Go 1.27, его установка описана в [инструкции Хекслета](https://github.com/Hexlet/ru-instructions/blob/main/go.md).
 
 `make <задача>` вызывает ту же задачу mise.
 
