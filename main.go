@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"io"
@@ -31,8 +32,9 @@ func env(name, fallback string) string {
 }
 
 // newApp собирает приложение Fiber с контрактом курса. Журнал запросов
-// пишется в out, ошибки уходят в Sentry через hub.
-func newApp(hub *sentry.Hub, out io.Writer) *fiber.App {
+// пишется в out, ошибки уходят в Sentry через hub. Без базы counter равен nil,
+// и главная страница выходит без счётчика посещений.
+func newApp(hub *sentry.Hub, out io.Writer, counter visitCounter) *fiber.App {
 	// Строгие настройки маршрутизации: /Error и /error/ не считаются /error.
 	app := fiber.New(fiber.Config{CaseSensitive: true, StrictRouting: true})
 
@@ -45,14 +47,23 @@ func newApp(hub *sentry.Hub, out io.Writer) *fiber.App {
 
 	app.Get("/", func(c fiber.Ctx) error {
 		message := html.EscapeString(env("SERVER_MESSAGE", "Hello, PaaS!"))
+		visits := ""
+		if counter != nil {
+			total, err := counter(c.Context())
+			if err != nil {
+				// Сбой базы обрабатывается как ошибка /error: событие в Sentry и ответ 500.
+				hub.CaptureException(err)
+				return fail(c)
+			}
+			visits = fmt.Sprintf("<p>Посещений: %d</p>", total)
+		}
 		c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
-		return c.SendString("<h1>" + heading + "</h1><p>" + message + "</p>\n")
+		return c.SendString("<h1>" + heading + "</h1><p>" + message + "</p>" + visits + "\n")
 	})
 
 	app.Get("/error", func(c fiber.Ctx) error {
 		hub.CaptureException(requestError(errorMessage))
-		c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
-		return c.Status(fiber.StatusInternalServerError).SendString(errorMessage + "\n")
+		return fail(c)
 	})
 
 	// Любой другой путь и метод.
@@ -62,6 +73,11 @@ func newApp(hub *sentry.Hub, out io.Writer) *fiber.App {
 	})
 
 	return app
+}
+
+func fail(c fiber.Ctx) error {
+	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
+	return c.Status(fiber.StatusInternalServerError).SendString(errorMessage + "\n")
 }
 
 func listenAddr(port string) string {
@@ -74,8 +90,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, "sentry:", err)
 		os.Exit(1)
 	}
+	// С DATABASE_URL приложение сначала применяет миграции и только потом
+	// начинает принимать запросы. Без неё оно работает без базы.
+	var counter visitCounter
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		db, err := openDB(url)
+		if err == nil {
+			err = migrate(context.Background(), db, os.Stdout)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "database:", err)
+			os.Exit(1)
+		}
+		counter = newVisitCounter(db)
+	}
 	addr := listenAddr(env("PORT", "3000"))
-	app := newApp(sentry.CurrentHub(), os.Stdout)
+	app := newApp(sentry.CurrentHub(), os.Stdout, counter)
 	// Стартовый баннер Fiber выключен, строку запуска печатает ListenerAddrFunc,
 	// когда порт уже занят.
 	listenConfig := fiber.ListenConfig{

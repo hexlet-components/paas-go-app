@@ -37,6 +37,12 @@ func (r *recorder) count() int {
 
 func setup(t *testing.T) (*fiber.App, *recorder, *bytes.Buffer) {
 	t.Helper()
+	return setupWithCounter(t, nil)
+}
+
+// setupWithCounter собирает приложение со счётчиком посещений; nil означает работу без базы.
+func setupWithCounter(t *testing.T, counter visitCounter) (*fiber.App, *recorder, *bytes.Buffer) {
+	t.Helper()
 	t.Setenv("SERVER_MESSAGE", "Первая <публикация>")
 	transport := &recorder{}
 	client, err := sentry.NewClient(sentry.ClientOptions{Transport: transport})
@@ -45,7 +51,7 @@ func setup(t *testing.T) (*fiber.App, *recorder, *bytes.Buffer) {
 	}
 	hub := sentry.NewHub(client, sentry.NewScope())
 	logs := &bytes.Buffer{}
-	return newApp(hub, logs), transport, logs
+	return newApp(hub, logs, counter), transport, logs
 }
 
 type result struct {
@@ -152,5 +158,15 @@ func TestEnvFallback(t *testing.T) {
 	t.Setenv("PORT", "8080")
 	if got := env("PORT", "3000"); got != "8080" {
 		t.Fatalf("PORT = %q", got)
+	}
+}
+
+func TestDatabaseFailureIsReported(t *testing.T) {
+	failing := func(context.Context) (int64, error) { return 0, requestError("database is down") }
+	app, transport, _ := setupWithCounter(t, failing)
+	expect(t, get(t, app, "/"), http.StatusInternalServerError,
+		"text/plain; charset=utf-8", "Oops! Something went wrong!\n")
+	if transport.count() != 1 {
+		t.Fatalf("events = %d, want 1", transport.count())
 	}
 }
