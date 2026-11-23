@@ -48,7 +48,9 @@ func newApp(hub *sentry.Hub, out io.Writer, counter visitCounter) *fiber.App {
 	app.Get("/", func(c fiber.Ctx) error {
 		message := html.EscapeString(env("SERVER_MESSAGE", "Hello, PaaS!"))
 		visits := ""
-		if counter != nil {
+		// Fiber отвечает на HEAD тем же обработчиком. HEAD присылают проверки
+		// платформы при запуске, поэтому посещением считается только GET.
+		if counter != nil && c.Method() == fiber.MethodGet {
 			total, err := counter(c.Context())
 			if err != nil {
 				// Сбой базы обрабатывается как ошибка /error: событие в Sentry и ответ 500.

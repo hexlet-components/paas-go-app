@@ -67,6 +67,8 @@ func TestHomeCountsVisits(t *testing.T) {
 		t.Fatal(err)
 	}
 	app, _, _ := setupWithCounter(t, newVisitCounter(db))
+	// HEAD присылают проверки платформы, посещением он не считается.
+	request(t, app, http.MethodHead, "/")
 	for visit := 1; visit <= 2; visit++ {
 		expect(t, get(t, app, "/"), http.StatusOK, "text/html; charset=utf-8",
 			fmt.Sprintf("<h1>Привет от Хекслета!</h1><p>Первая &lt;публикация&gt;</p><p>Посещений: %d</p>\n", visit))
